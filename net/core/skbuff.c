@@ -3450,6 +3450,8 @@ normal:
 
 			if (unlikely(skb_orphan_frags(frag_skb, GFP_ATOMIC)))
 				goto err;
+			if (skb_zerocopy_clone(nskb, frag_skb, GFP_ATOMIC))
+				goto err;
 
 			*nskb_frag = *frag;
 			__skb_frag_ref(nskb_frag);
