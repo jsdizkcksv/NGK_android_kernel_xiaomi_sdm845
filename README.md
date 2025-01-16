@@ -1,0 +1,1 @@
+# NGK_android_kernel_xiaomi_sdm845
