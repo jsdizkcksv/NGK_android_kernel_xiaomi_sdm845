@@ -140,8 +140,10 @@ struct bpf_verifier_stack_elem {
 	struct bpf_verifier_stack_elem *next;
 };
 
-#define BPF_COMPLEXITY_LIMIT_INSNS	98304
+#define BPF_COMPLEXITY_LIMIT_INSNS	131072
 #define BPF_COMPLEXITY_LIMIT_STACK	1024
+
+#define BPF_MAP_PTR_POISON ((void *)0xeB9F + POISON_POINTER_DELTA)
 
 struct bpf_call_arg_meta {
 	struct bpf_map *map_ptr;
@@ -503,6 +505,7 @@ static void reset_reg_range_values(struct bpf_reg_state *regs, u32 regno)
 {
 	regs[regno].min_value = BPF_REGISTER_MIN_RANGE;
 	regs[regno].max_value = BPF_REGISTER_MAX_RANGE;
+	regs[regno].value_from_signed = false;
 	regs[regno].min_align = 0;
 }
 
@@ -875,9 +878,6 @@ static int check_ptr_alignment(struct bpf_verifier_env *env,
 			       int off, int size)
 {
 	bool strict = env->strict_alignment;
-
-	if (!IS_ENABLED(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS))
-		strict = true;
 
 	switch (reg->type) {
 	case PTR_TO_PACKET:
@@ -1316,12 +1316,10 @@ static int check_map_func_compatibility(struct bpf_map *map, int func_id)
 		    func_id != BPF_FUNC_current_task_under_cgroup)
 			goto error;
 		break;
-	/* devmap returns a pointer to a live net_device ifindex that we cannot
-	 * allow to be modified from bpf side. So do not allow lookup elements
-	 * for now.
-	 */
 	case BPF_MAP_TYPE_DEVMAP:
-		if (func_id != BPF_FUNC_redirect_map)
+	case BPF_MAP_TYPE_DEVMAP_HASH:
+		if (func_id != BPF_FUNC_redirect_map &&
+		    func_id != BPF_FUNC_map_lookup_elem)
 			goto error;
 		break;
 	case BPF_MAP_TYPE_ARRAY_OF_MAPS:
@@ -1359,7 +1357,8 @@ static int check_map_func_compatibility(struct bpf_map *map, int func_id)
 			goto error;
 		break;
 	case BPF_FUNC_redirect_map:
-		if (map->map_type != BPF_MAP_TYPE_DEVMAP)
+		if (map->map_type != BPF_MAP_TYPE_DEVMAP &&
+		    map->map_type != BPF_MAP_TYPE_DEVMAP_HASH)
 			goto error;
 		break;
 	case BPF_FUNC_sk_redirect_map:
@@ -1509,6 +1508,8 @@ static int check_call(struct bpf_verifier_env *env, int func_id, int insn_idx)
 	} else if (fn->ret_type == RET_VOID) {
 		regs[BPF_REG_0].type = NOT_INIT;
 	} else if (fn->ret_type == RET_PTR_TO_MAP_VALUE_OR_NULL) {
+		struct bpf_insn_aux_data *insn_aux;
+
 		regs[BPF_REG_0].type = PTR_TO_MAP_VALUE_OR_NULL;
 		regs[BPF_REG_0].max_value = regs[BPF_REG_0].min_value = 0;
 		/* remember map_ptr, so that check_map_access()
@@ -1521,7 +1522,11 @@ static int check_call(struct bpf_verifier_env *env, int func_id, int insn_idx)
 		}
 		regs[BPF_REG_0].map_ptr = meta.map_ptr;
 		regs[BPF_REG_0].id = ++env->id_gen;
-		env->insn_aux_data[insn_idx].map_ptr = meta.map_ptr;
+		insn_aux = &env->insn_aux_data[insn_idx];
+		if (!insn_aux->map_ptr)
+			insn_aux->map_ptr = meta.map_ptr;
+		else if (insn_aux->map_ptr != meta.map_ptr)
+			insn_aux->map_ptr = BPF_MAP_PTR_POISON;
 	} else {
 		verbose("unknown return type %d of func %s#%d\n",
 			fn->ret_type, func_id_name(func_id), func_id);
@@ -1610,7 +1615,7 @@ add_imm:
 		dst_reg->id = ++env->id_gen;
 
 		/* something was added to pkt_ptr, set range to zero */
-		dst_reg->aux_off = dst_reg->off;
+		dst_reg->aux_off += dst_reg->off;
 		dst_reg->off = 0;
 		dst_reg->range = 0;
 		if (had_id)
@@ -1966,10 +1971,9 @@ static void adjust_reg_min_max_vals(struct bpf_verifier_env *env,
 		 * unsigned shift, so make the appropriate casts.
 		 */
 		if (min_val < 0 || dst_reg->min_value < 0) {
-			dst_reg->min_value = BPF_REGISTER_MIN_RANGE;
+			reset_reg_range_values(regs, insn->dst_reg);
 		} else {
-			dst_reg->min_value =
-				(u64)(dst_reg->min_value) >> min_val;
+			dst_reg->min_value = (u64)(dst_reg->min_value) >> max_val;
 		}
 		if (min_val < 0) {
 			dst_reg->min_align = 1;
@@ -2085,9 +2089,11 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 
 			regs[insn->dst_reg].type = CONST_IMM;
 			regs[insn->dst_reg].imm = imm;
+			regs[insn->dst_reg].id = 0;
 			regs[insn->dst_reg].max_value = imm;
 			regs[insn->dst_reg].min_value = imm;
 			regs[insn->dst_reg].min_align = calc_align(imm);
+			regs[insn->dst_reg].value_from_signed = false;
 		}
 
 	} else if (opcode > BPF_END) {
@@ -2629,6 +2635,7 @@ static int check_ld_imm(struct bpf_verifier_env *env, struct bpf_insn *insn)
 
 		regs[insn->dst_reg].type = CONST_IMM;
 		regs[insn->dst_reg].imm = imm;
+		regs[insn->dst_reg].id = 0;
 		return 0;
 	}
 
@@ -2646,6 +2653,7 @@ static bool may_access_skb(enum bpf_prog_type type)
 	case BPF_PROG_TYPE_SOCKET_FILTER:
 	case BPF_PROG_TYPE_SCHED_CLS:
 	case BPF_PROG_TYPE_SCHED_ACT:
+	case BPF_PROG_TYPE_CGROUP_SKB:
 		return true;
 	default:
 		return false;
@@ -2915,7 +2923,8 @@ err_free:
 /* the following conditions reduce the number of explored insns
  * from ~140k to ~80k for ultra large programs that use a lot of ptr_to_packet
  */
-static bool compare_ptrs_to_packet(struct bpf_reg_state *old,
+static bool compare_ptrs_to_packet(struct bpf_verifier_env *env,
+				   struct bpf_reg_state *old,
 				   struct bpf_reg_state *cur)
 {
 	if (old->id != cur->id)
@@ -2958,7 +2967,7 @@ static bool compare_ptrs_to_packet(struct bpf_reg_state *old,
 	 * 'if (R4 > data_end)' and all further insn were already good with r=20,
 	 * so they will be good with r=30 and we can prune the search.
 	 */
-	if (old->off <= cur->off &&
+	if (!env->strict_alignment && old->off <= cur->off &&
 	    old->off >= old->range && cur->off >= cur->range)
 		return true;
 
@@ -3030,7 +3039,7 @@ static bool states_equal(struct bpf_verifier_env *env,
 			continue;
 
 		if (rold->type == PTR_TO_PACKET && rcur->type == PTR_TO_PACKET &&
-		    compare_ptrs_to_packet(rold, rcur))
+		    compare_ptrs_to_packet(env, rold, rcur))
 			continue;
 
 		return false;
@@ -3047,6 +3056,8 @@ static bool states_equal(struct bpf_verifier_env *env,
 			 */
 			return false;
 		if (i % BPF_REG_SIZE)
+			continue;
+		if (old->stack_slot_type[i] != STACK_SPILL)
 			continue;
 		if (memcmp(&old->spilled_regs[i / BPF_REG_SIZE],
 			   &cur->spilled_regs[i / BPF_REG_SIZE],
@@ -3873,7 +3884,8 @@ static int fixup_bpf_calls(struct bpf_verifier_env *env)
 
 		if (ebpf_jit_enabled() && insn->imm == BPF_FUNC_map_lookup_elem) {
 			map_ptr = env->insn_aux_data[i + delta].map_ptr;
-			if (!map_ptr->ops->map_gen_lookup)
+			if (map_ptr == BPF_MAP_PTR_POISON ||
+			    !map_ptr->ops->map_gen_lookup)
 				goto patch_call_imm;
 
 			cnt = map_ptr->ops->map_gen_lookup(map_ptr, insn_buf);
@@ -3978,10 +3990,10 @@ int bpf_check(struct bpf_prog **prog, union bpf_attr *attr)
 	} else {
 		log->level = 0;
 	}
-	if (attr->prog_flags & BPF_F_STRICT_ALIGNMENT)
+
+	env->strict_alignment = !!(attr->prog_flags & BPF_F_STRICT_ALIGNMENT);
+	if (!IS_ENABLED(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS))
 		env->strict_alignment = true;
-	else
-		env->strict_alignment = false;
 
 	if (env->prog->aux->offload) {
 		ret = bpf_prog_offload_verifier_prep(env);
@@ -4097,7 +4109,10 @@ int bpf_analyzer(struct bpf_prog *prog, const struct bpf_ext_analyzer_ops *ops,
 	mutex_lock(&bpf_verifier_lock);
 
 	verifier_log.level = 0;
+
 	env->strict_alignment = false;
+	if (!IS_ENABLED(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS))
+		env->strict_alignment = true;
 
 	env->explored_states = kcalloc(env->prog->len,
 				       sizeof(struct bpf_verifier_state_list *),
