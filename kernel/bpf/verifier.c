@@ -700,6 +700,21 @@ enum reg_arg_type {
 	DST_OP_NO_MARK	/* same as above, check only, don't mark */
 };
 
+static void mark_reg_read(const struct bpf_verifier_state *state, u32 regno)
+{
+	struct bpf_verifier_state *parent = state->parent;
+
+	while (parent) {
+		/* if read wasn't screened by an earlier write ... */
+		if (state->regs[regno].live & REG_LIVE_WRITTEN)
+			break;
+		/* ... then we depend on parent's value */
+		parent->regs[regno].live |= REG_LIVE_READ;
+		state = parent;
+		parent = state->parent;
+	}
+}
+
 static int check_reg_arg(struct bpf_reg_state *regs, u32 regno,
 			 enum reg_arg_type t)
 {
