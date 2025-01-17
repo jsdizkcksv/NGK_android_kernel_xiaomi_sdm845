@@ -3446,6 +3446,51 @@ out_free:
 	return ret;
 }
 
+static bool do_propagate_liveness(const struct bpf_verifier_state *state,
+				  struct bpf_verifier_state *parent)
+{
+	bool touched = false; /* any changes made? */
+	int i;
+
+	if (!parent)
+		return touched;
+	/* Propagate read liveness of registers... */
+	BUILD_BUG_ON(BPF_REG_FP + 1 != MAX_BPF_REG);
+	/* We don't need to worry about FP liveness because it's read-only */
+	for (i = 0; i < BPF_REG_FP; i++) {
+		if (parent->regs[i].live & REG_LIVE_READ)
+			continue;
+		if (state->regs[i].live == REG_LIVE_READ) {
+			parent->regs[i].live |= REG_LIVE_READ;
+			touched = true;
+		}
+	}
+	/* ... and stack slots */
+	for (i = 0; i < MAX_BPF_STACK / BPF_REG_SIZE; i++) {
+		if (parent->stack_slot_type[i * BPF_REG_SIZE] != STACK_SPILL)
+			continue;
+		if (state->stack_slot_type[i * BPF_REG_SIZE] != STACK_SPILL)
+			continue;
+		if (parent->spilled_regs[i].live & REG_LIVE_READ)
+			continue;
+		if (state->spilled_regs[i].live == REG_LIVE_READ) {
+			parent->regs[i].live |= REG_LIVE_READ;
+			touched = true;
+		}
+	}
+	return touched;
+}
+
+static void propagate_liveness(const struct bpf_verifier_state *state,
+			       struct bpf_verifier_state *parent)
+{
+	while (do_propagate_liveness(state, parent)) {
+		/* Something changed, so we need to feed those changes onward */
+		state = parent;
+		parent = state->parent;
+	}
+}
+
 static int is_state_visited(struct bpf_verifier_env *env, int insn_idx)
 {
 	struct bpf_verifier_state_list *new_sl;
