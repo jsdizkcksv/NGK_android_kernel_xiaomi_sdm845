@@ -1991,6 +1991,40 @@ static inline void tcp_segs_in(struct tcp_sock *tp, const struct sk_buff *skb)
 		tp->data_segs_in += segs_in;
 }
 
+int tcp_peek_len(struct socket *sock);
+
+/* Call BPF_SOCK_OPS program that returns an int. If the return value
+ * is < 0, then the BPF op failed (for example if the loaded BPF
+ * program does not support the chosen operation or there is no BPF
+ * program loaded).
+ */
+#ifdef CONFIG_BPF
+static inline int tcp_call_bpf(struct sock *sk, int op)
+{
+	struct bpf_sock_ops_kern sock_ops;
+	int ret;
+
+	if (sk_fullsock(sk))
+		sock_owned_by_me(sk);
+
+	memset(&sock_ops, 0, sizeof(sock_ops));
+	sock_ops.sk = sk;
+	sock_ops.op = op;
+
+	ret = BPF_CGROUP_RUN_PROG_SOCK_OPS(&sock_ops);
+	if (ret == 0)
+		ret = sock_ops.reply;
+	else
+		ret = -1;
+	return ret;
+}
+#else
+static inline int tcp_call_bpf(struct sock *sk, int op)
+{
+	return -EPERM;
+}
+#endif
+
 /*
  * TCP listen path runs lockless.
  * We forced "struct sock" to be const qualified to make sure
