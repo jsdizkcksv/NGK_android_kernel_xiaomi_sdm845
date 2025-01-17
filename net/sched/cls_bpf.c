@@ -360,6 +360,11 @@ static int cls_bpf_prog_from_efd(struct nlattr **tb, struct cls_bpf_prog *prog,
 	if (IS_ERR(fp))
 		return PTR_ERR(fp);
 
+	if (gen_flags & TCA_CLS_FLAGS_SKIP_SW)
+		fp = bpf_prog_get_type_dev(bpf_fd, BPF_PROG_TYPE_SCHED_CLS,
+					   qdisc_dev(tp->q));
+	else
+		fp = bpf_prog_get_type(bpf_fd, BPF_PROG_TYPE_SCHED_CLS);
 	if (tb[TCA_BPF_NAME]) {
 		name = kmemdup(nla_data(tb[TCA_BPF_NAME]),
 			       nla_len(tb[TCA_BPF_NAME]),
