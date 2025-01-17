@@ -4890,7 +4890,6 @@ static u32 sock_addr_convert_ctx_access(enum bpf_access_type type,
 			struct bpf_sock_addr_kern, struct sockaddr_in, uaddr,
 			sin_addr, BPF_SIZE(si->code), 0, tmp_reg);
 		break;
-
 	case bpf_ctx_range_till(struct bpf_sock_addr, user_ip6[0], user_ip6[3]):
 		off = si->off;
 		off -= offsetof(struct bpf_sock_addr, user_ip6[0]);
