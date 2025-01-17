@@ -3496,8 +3496,10 @@ static int is_state_visited(struct bpf_verifier_env *env, int insn_idx)
 	while (sl != STATE_LIST_MARK) {
 		if (states_equal(env, &sl->state, &env->cur_state))
 			/* reached equivalent register/stack state,
-			 * prune the search
+			 * prune the search.
+			 * Registers read by the continuation are read by us.
 			 */
+			propagate_liveness(&sl->state, &env->cur_state);
 			return 1;
 		sl = sl->next;
 	}
@@ -3516,6 +3518,14 @@ static int is_state_visited(struct bpf_verifier_env *env, int insn_idx)
 	memcpy(&new_sl->state, &env->cur_state, sizeof(env->cur_state));
 	new_sl->next = env->explored_states[insn_idx];
 	env->explored_states[insn_idx] = new_sl;
+	/* connect new state to parentage chain */
+	env->cur_state.parent = &new_sl->state;
+	/* clear liveness marks in current state */
+	for (i = 0; i < BPF_REG_FP; i++)
+		env->cur_state.regs[i].live = REG_LIVE_NONE;
+	for (i = 0; i < MAX_BPF_STACK / BPF_REG_SIZE; i++)
+		if (env->cur_state.stack_slot_type[i * BPF_REG_SIZE] == STACK_SPILL)
+			env->cur_state.spilled_regs[i].live = REG_LIVE_NONE;
 	return 0;
 }
 

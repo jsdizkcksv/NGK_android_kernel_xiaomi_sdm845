@@ -21,6 +21,12 @@
  */
 #define BPF_MAX_VAR_SIZ	INT_MAX
 
+enum bpf_reg_liveness {
+	REG_LIVE_NONE = 0, /* reg hasn't been read or written this branch */
+	REG_LIVE_READ, /* reg was read, so we're sensitive to initial value */
+	REG_LIVE_WRITTEN, /* reg was written first, screening off later reads */
+};
+
 struct bpf_reg_state {
 	enum bpf_reg_type type;
 	union {
