@@ -1514,7 +1514,7 @@ static int bpf_prog_attach(const union bpf_attr *attr)
 	}
 
 	ret = cgroup_bpf_attach(cgrp, prog, attr->attach_type,
-							attr->attach_flags);
+				attr->attach_flags);
 	if (ret)
 		bpf_prog_put(prog);
 	cgroup_put(cgrp);
