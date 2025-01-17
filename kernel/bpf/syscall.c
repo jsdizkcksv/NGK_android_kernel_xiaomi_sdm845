@@ -1508,16 +1508,17 @@ static int bpf_prog_attach(const union bpf_attr *attr)
 	}
 
 	cgrp = cgroup_get_from_fd(attr->target_fd);
-		if (IS_ERR(cgrp)) {
-			bpf_prog_put(prog);
-			return PTR_ERR(cgrp);
-		}
+	if (IS_ERR(cgrp)) {
+		bpf_prog_put(prog);
+		return PTR_ERR(cgrp);
+	}
 
 	ret = cgroup_bpf_attach(cgrp, prog, attr->attach_type,
 							attr->attach_flags);
 	if (ret)
 		bpf_prog_put(prog);
 	cgroup_put(cgrp);
+
 	return ret;
 }
 #define BPF_PROG_DETACH_LAST_FIELD attach_type
