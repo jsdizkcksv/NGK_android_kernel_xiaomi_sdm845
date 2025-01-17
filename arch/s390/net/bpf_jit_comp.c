@@ -1332,33 +1332,17 @@ static int bpf_jit_prog(struct bpf_jit *jit, struct bpf_prog *fp)
  */
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 {
-	struct bpf_prog *tmp, *orig_fp = fp;
 	struct bpf_binary_header *header;
-	bool tmp_blinded = false;
 	struct bpf_jit jit;
 	int pass;
 
 	if (!bpf_jit_enable)
-		return orig_fp;
-
-	tmp = bpf_jit_blind_constants(fp);
-	/*
-	 * If blinding was requested and we failed during blinding,
-	 * we must fall back to the interpreter.
-	 */
-	if (IS_ERR(tmp))
-		return orig_fp;
-	if (tmp != fp) {
-		tmp_blinded = true;
-		fp = tmp;
-	}
+		return fp;
 
 	memset(&jit, 0, sizeof(jit));
 	jit.addrs = kcalloc(fp->len + 1, sizeof(*jit.addrs), GFP_KERNEL);
-	if (jit.addrs == NULL) {
-		fp = orig_fp;
-		goto out;
-	}
+	if (jit.addrs == NULL)
+		return fp;
 	/*
 	 * Three initial passes:
 	 *   - 1/2: Determine clobbered registers
