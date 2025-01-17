@@ -1886,29 +1886,6 @@ static const struct bpf_func_proto bpf_redirect_proto = {
 	.arg2_type      = ARG_ANYTHING,
 };
 
-BPF_CALL_3(bpf_redirect_map, struct bpf_map *, map, u32, ifindex, u64, flags)
-{
-	struct redirect_info *ri = this_cpu_ptr(&redirect_info);
-
-	if (unlikely(flags))
-		return XDP_ABORTED;
-
-	ri->ifindex = ifindex;
-	ri->flags = flags;
-	ri->map = map;
-
-	return XDP_REDIRECT;
-}
-
-static const struct bpf_func_proto bpf_redirect_map_proto = {
-	.func           = bpf_redirect_map,
-	.gpl_only       = false,
-	.ret_type       = RET_INTEGER,
-	.arg1_type      = ARG_CONST_MAP_PTR,
-	.arg2_type      = ARG_ANYTHING,
-	.arg3_type      = ARG_ANYTHING,
-};
-
 BPF_CALL_3(bpf_sk_redirect_map, struct bpf_map *, map, u32, key, u64, flags)
 {
 	struct redirect_info *ri = this_cpu_ptr(&redirect_info);
