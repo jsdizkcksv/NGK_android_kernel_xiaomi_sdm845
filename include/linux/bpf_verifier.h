@@ -59,7 +59,7 @@ struct bpf_reg_state {
 	 * came from, when one is tested for != NULL.
 	 */
 	u32 id;
-	/* These five fields must be last.  See states_equal() */
+	/* Ordering of fields matters.  See states_equal() */
 	/* For scalar types (SCALAR_VALUE), this represents our knowledge of
 	 * the actual value.
 	 * For pointer types, this represents the variable part of the offset
@@ -76,6 +76,8 @@ struct bpf_reg_state {
 	s64 smax_value; /* maximum possible (s64)value */
 	u64 umin_value; /* minimum possible (u64)value */
 	u64 umax_value; /* maximum possible (u64)value */
+	/* This field must be last, for states_equal() reasons. */
+	enum bpf_reg_liveness live;
 };
 
 enum bpf_stack_slot_type {
@@ -93,6 +95,7 @@ struct bpf_verifier_state {
 	struct bpf_reg_state regs[MAX_BPF_REG];
 	u8 stack_slot_type[MAX_BPF_STACK];
 	struct bpf_reg_state spilled_regs[MAX_BPF_STACK / BPF_REG_SIZE];
+	struct bpf_verifier_state *parent;
 };
 
 /* linked list of verifier states used to prune search */
@@ -114,9 +117,11 @@ struct bpf_insn_aux_data {
 
 #define MAX_USED_MAPS 64 /* max number of maps accessed by one eBPF program */
 
+#define BPF_VERIFIER_TMP_LOG_SIZE	1024
+
 struct bpf_verifer_log {
 	u32 level;
-	char *kbuf;
+	char kbuf[BPF_VERIFIER_TMP_LOG_SIZE];
 	char __user *ubuf;
 	u32 len_used;
 	u32 len_total;
@@ -152,6 +157,8 @@ struct bpf_verifier_env {
 	bool allow_ptr_leaks;
 	bool seen_direct_write;
 	struct bpf_insn_aux_data *insn_aux_data; /* array of per-insn state */
+
+	struct bpf_verifer_log log;
 };
 
 #if defined(CONFIG_NET) && defined(CONFIG_BPF_SYSCALL)
