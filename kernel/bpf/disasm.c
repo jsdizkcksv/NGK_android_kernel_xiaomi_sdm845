@@ -10,21 +10,27 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
  * General Public License for more details.
  */
+
 #include <linux/bpf.h>
+
 #include "disasm.h"
+
 #define __BPF_FUNC_STR_FN(x) [BPF_FUNC_ ## x] = __stringify(bpf_ ## x)
 static const char * const func_id_str[] = {
 	__BPF_FUNC_MAPPER(__BPF_FUNC_STR_FN)
 };
 #undef __BPF_FUNC_STR_FN
+
 const char *func_id_name(int id)
 {
 	BUILD_BUG_ON(ARRAY_SIZE(func_id_str) != __BPF_FUNC_MAX_ID);
+
 	if (id >= 0 && id < __BPF_FUNC_MAX_ID && func_id_str[id])
 		return func_id_str[id];
 	else
 		return "unknown";
 }
+
 const char *const bpf_class_string[8] = {
 	[BPF_LD]    = "ld",
 	[BPF_LDX]   = "ldx",
@@ -35,6 +41,7 @@ const char *const bpf_class_string[8] = {
 	[BPF_RET]   = "BUG",
 	[BPF_ALU64] = "alu64",
 };
+
 const char *const bpf_alu_string[16] = {
 	[BPF_ADD >> 4]  = "+=",
 	[BPF_SUB >> 4]  = "-=",
@@ -51,12 +58,14 @@ const char *const bpf_alu_string[16] = {
 	[BPF_ARSH >> 4] = "s>>=",
 	[BPF_END >> 4]  = "endian",
 };
+
 static const char *const bpf_ldst_string[] = {
 	[BPF_W >> 3]  = "u32",
 	[BPF_H >> 3]  = "u16",
 	[BPF_B >> 3]  = "u8",
 	[BPF_DW >> 3] = "u64",
 };
+
 static const char *const bpf_jmp_string[16] = {
 	[BPF_JA >> 4]   = "jmp",
 	[BPF_JEQ >> 4]  = "==",
@@ -73,6 +82,7 @@ static const char *const bpf_jmp_string[16] = {
 	[BPF_CALL >> 4] = "call",
 	[BPF_EXIT >> 4] = "exit",
 };
+
 static void print_bpf_end_insn(bpf_insn_print_cb verbose,
 			       struct bpf_verifier_env *env,
 			       const struct bpf_insn *insn)
@@ -81,10 +91,12 @@ static void print_bpf_end_insn(bpf_insn_print_cb verbose,
 		BPF_SRC(insn->code) == BPF_TO_BE ? "be" : "le",
 		insn->imm, insn->dst_reg);
 }
+
 void print_bpf_insn(bpf_insn_print_cb verbose, struct bpf_verifier_env *env,
 		    const struct bpf_insn *insn, bool allow_ptr_leaks)
 {
 	u8 class = BPF_CLASS(insn->code);
+
 	if (class == BPF_ALU || class == BPF_ALU64) {
 		if (BPF_OP(insn->code) == BPF_END) {
 			if (class == BPF_ALU64)
@@ -163,8 +175,10 @@ void print_bpf_insn(bpf_insn_print_cb verbose, struct bpf_verifier_env *env,
 			 */
 			u64 imm = ((u64)(insn + 1)->imm << 32) | (u32)insn->imm;
 			bool map_ptr = insn->src_reg == BPF_PSEUDO_MAP_FD;
+
 			if (map_ptr && !allow_ptr_leaks)
 				imm = 0;
+
 			verbose(env, "(%02x) r%d = 0x%llx\n", insn->code,
 				insn->dst_reg, (unsigned long long)imm);
 		} else {
@@ -173,6 +187,7 @@ void print_bpf_insn(bpf_insn_print_cb verbose, struct bpf_verifier_env *env,
 		}
 	} else if (class == BPF_JMP) {
 		u8 opcode = BPF_OP(insn->code);
+
 		if (opcode == BPF_CALL) {
 			if (insn->src_reg == BPF_PSEUDO_CALL)
 				verbose(env, "(%02x) call pc%+d\n", insn->code,
