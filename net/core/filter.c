@@ -4194,6 +4194,8 @@ static bool sock_addr_is_valid_access(int off, int size,
 		switch (prog->expected_attach_type) {
 		case BPF_CGROUP_INET4_BIND:
 		case BPF_CGROUP_INET4_CONNECT:
+		case BPF_CGROUP_UDP4_SENDMSG:
+        case BPF_CGROUP_UDP4_RECVMSG:
 			break;
 		default:
 			return false;
