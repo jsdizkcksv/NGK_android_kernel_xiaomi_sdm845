@@ -1254,6 +1254,25 @@ static int rtnl_fill_link_ifmap(struct sk_buff *skb, struct net_device *dev)
 	return 0;
 }
 
+static u8 rtnl_xdp_attached_mode(struct net_device *dev, u32 *prog_id)
+{
+	const struct net_device_ops *ops = dev->netdev_ops;
+	const struct bpf_prog *generic_xdp_prog;
+
+	ASSERT_RTNL();
+
+	*prog_id = 0;
+	generic_xdp_prog = rtnl_dereference(dev->xdp_prog);
+	if (generic_xdp_prog) {
+		*prog_id = generic_xdp_prog->aux->id;
+		return XDP_ATTACHED_SKB;
+	}
+	if (!ops->ndo_xdp)
+		return XDP_ATTACHED_NONE;
+
+	return __dev_xdp_attached(dev, ops->ndo_xdp, prog_id);
+}
+
 static int rtnl_xdp_fill(struct sk_buff *skb, struct net_device *dev)
 {
 	struct netdev_bpf bpf_op = {};

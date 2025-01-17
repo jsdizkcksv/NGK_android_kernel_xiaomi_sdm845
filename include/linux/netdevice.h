@@ -782,14 +782,55 @@ static inline bool netdev_phys_item_id_same(struct netdev_phys_item_id *a,
 typedef u16 (*select_queue_fallback_t)(struct net_device *dev,
 				       struct sk_buff *skb);
 
+	/* These structures hold the attributes of xdp state that are being passed
+	 * to the netdevice through the xdp op.
+	 */
+	enum xdp_netdev_command {
+		/* Set or clear a bpf program used in the earliest stages of packet
+		 * rx. The prog will have been loaded as BPF_PROG_TYPE_XDP. The callee
+		 * is responsible for calling bpf_prog_put on any old progs that are
+		 * stored. In case of error, the callee need not release the new prog
+		 * reference, but on success it takes ownership and must bpf_prog_put
+		 * when it is no longer used.
+		 */
+		XDP_SETUP_PROG,
+		/* Check if a bpf program is set on the device.  The callee should
+		 * return true if a program is currently attached and running.
+		 */
+		XDP_QUERY_PROG,
+		/* BPF program for offload callbacks, invoked at program load time. */
+		BPF_OFFLOAD_VERIFIER_PREP,
+		BPF_OFFLOAD_TRANSLATE,
+		BPF_OFFLOAD_DESTROY,
+	};
+
+	struct bpf_ext_analyzer_ops;
+
+	struct netdev_xdp {
+		enum xdp_netdev_command command;
+		union {
+			/* XDP_SETUP_PROG */
+			struct bpf_prog *prog;
+			/* XDP_QUERY_PROG */
+			bool prog_attached;
+			/* BPF_OFFLOAD_VERIFIER_PREP */
+			struct {
+				struct bpf_prog *prog;
+				const struct bpf_ext_analyzer_ops *ops; /* callee set */
+			} verifier;
+			/* BPF_OFFLOAD_TRANSLATE, BPF_OFFLOAD_DESTROY */
+			struct {
+				struct bpf_prog *prog;
+		} offload;
+	};
+};
+
 /* These structures hold the attributes of qdisc and classifiers
  * that are being passed to the netdevice through the setup_tc op.
  */
 enum {
 	TC_SETUP_MQPRIO,
 	TC_SETUP_CLSU32,
-	TC_SETUP_CLSFLOWER,
-	TC_SETUP_MATCHALL,
 	TC_SETUP_CLSBPF,
 };
 
@@ -800,52 +841,7 @@ struct tc_to_netdev {
 	union {
 		u8 tc;
 		struct tc_cls_u32_offload *cls_u32;
-		struct tc_cls_flower_offload *cls_flower;
-		struct tc_cls_matchall_offload *cls_mall;
 		struct tc_cls_bpf_offload *cls_bpf;
-	};
-};
-
-/* These structures hold the attributes of xdp state that are being passed
- * to the netdevice through the xdp op.
- */
-enum xdp_netdev_command {
-	/* Set or clear a bpf program used in the earliest stages of packet
-	 * rx. The prog will have been loaded as BPF_PROG_TYPE_XDP. The callee
-	 * is responsible for calling bpf_prog_put on any old progs that are
-	 * stored. In case of error, the callee need not release the new prog
-	 * reference, but on success it takes ownership and must bpf_prog_put
-	 * when it is no longer used.
-	 */
-	XDP_SETUP_PROG,
-	/* Check if a bpf program is set on the device.  The callee should
-	 * return true if a program is currently attached and running.
-	 */
-	XDP_QUERY_PROG,
-	/* BPF program for offload callbacks, invoked at program load time. */
-	BPF_OFFLOAD_VERIFIER_PREP,
-	BPF_OFFLOAD_TRANSLATE,
-	BPF_OFFLOAD_DESTROY,
-};
-
-struct bpf_ext_analyzer_ops;
-
-struct netdev_xdp {
-	enum xdp_netdev_command command;
-	union {
-		/* XDP_SETUP_PROG */
-		struct bpf_prog *prog;
-		/* XDP_QUERY_PROG */
-		bool prog_attached;
-		/* BPF_OFFLOAD_VERIFIER_PREP */
-		struct {
-			struct bpf_prog *prog;
-			const struct bpf_ext_analyzer_ops *ops; /* callee set */
-		} verifier;
-		/* BPF_OFFLOAD_TRANSLATE, BPF_OFFLOAD_DESTROY */
-		struct {
-			struct bpf_prog *prog;
-		} offload;
 	};
 };
 
@@ -3401,14 +3397,15 @@ int dev_change_xdp_fd(struct net_device *dev, int fd, u32 flags);
 struct sk_buff *validate_xmit_skb_list(struct sk_buff *skb, struct net_device *dev);
 struct sk_buff *dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 				    struct netdev_queue *txq, int *ret);
-struct sk_buff *dev_hard_start_xmit_list(struct sk_buff *skb,
-				struct net_device *dev,
-				struct netdev_queue *txq,
-				int *ret);
+
+typedef int (*xdp_op_t)(struct net_device *dev, struct netdev_xdp *xdp);
+int dev_change_xdp_fd(struct net_device *dev, int fd, u32 flags);
+u8 __dev_xdp_attached(struct net_device *dev, xdp_op_t xdp_op, u32 *prog_id);
+
 int __dev_forward_skb(struct net_device *dev, struct sk_buff *skb);
 int dev_forward_skb(struct net_device *dev, struct sk_buff *skb);
-bool is_skb_forwardable(const struct net_device *dev,
-			const struct sk_buff *skb);
+bool is_skb_forwardable(struct net_device *dev, struct sk_buff *skb);
+
 
 static __always_inline int ____dev_forward_skb(struct net_device *dev,
 					       struct sk_buff *skb)
