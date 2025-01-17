@@ -782,45 +782,53 @@ static inline bool netdev_phys_item_id_same(struct netdev_phys_item_id *a,
 typedef u16 (*select_queue_fallback_t)(struct net_device *dev,
 				       struct sk_buff *skb);
 
-	/* These structures hold the attributes of xdp state that are being passed
-	 * to the netdevice through the xdp op.
+/* These structures hold the attributes of xdp state that are being passed
+ * to the netdevice through the xdp op.
+ */
+enum xdp_netdev_command {
+	/* Set or clear a bpf program used in the earliest stages of packet
+	 * rx. The prog will have been loaded as BPF_PROG_TYPE_XDP. The callee
+	 * is responsible for calling bpf_prog_put on any old progs that are
+	 * stored. In case of error, the callee need not release the new prog
+	 * reference, but on success it takes ownership and must bpf_prog_put
+	 * when it is no longer used.
 	 */
-	enum xdp_netdev_command {
-		/* Set or clear a bpf program used in the earliest stages of packet
-		 * rx. The prog will have been loaded as BPF_PROG_TYPE_XDP. The callee
-		 * is responsible for calling bpf_prog_put on any old progs that are
-		 * stored. In case of error, the callee need not release the new prog
-		 * reference, but on success it takes ownership and must bpf_prog_put
-		 * when it is no longer used.
-		 */
-		XDP_SETUP_PROG,
-		/* Check if a bpf program is set on the device.  The callee should
-		 * return true if a program is currently attached and running.
-		 */
-		XDP_QUERY_PROG,
-		/* BPF program for offload callbacks, invoked at program load time. */
-		BPF_OFFLOAD_VERIFIER_PREP,
-		BPF_OFFLOAD_TRANSLATE,
-		BPF_OFFLOAD_DESTROY,
-	};
+	XDP_SETUP_PROG,
+	XDP_SETUP_PROG_HW,
+	/* Check if a bpf program is set on the device.  The callee should
+	 * set @prog_attached to one of XDP_ATTACHED_* values, note that "true"
+	 * is equivalent to XDP_ATTACHED_DRV.
+	 */
+	XDP_QUERY_PROG,
+	/* BPF program for offload callbacks, invoked at program load time. */
+	BPF_OFFLOAD_VERIFIER_PREP,
+	BPF_OFFLOAD_TRANSLATE,
+	BPF_OFFLOAD_DESTROY,
+};
 
-	struct bpf_ext_analyzer_ops;
+struct bpf_ext_analyzer_ops;
 
-	struct netdev_xdp {
-		enum xdp_netdev_command command;
-		union {
-			/* XDP_SETUP_PROG */
+struct netdev_xdp {
+	enum xdp_netdev_command command;
+	union {
+		/* XDP_SETUP_PROG */
+		struct {
+			u32 flags;
 			struct bpf_prog *prog;
-			/* XDP_QUERY_PROG */
-			bool prog_attached;
-			/* BPF_OFFLOAD_VERIFIER_PREP */
-			struct {
-				struct bpf_prog *prog;
-				const struct bpf_ext_analyzer_ops *ops; /* callee set */
-			} verifier;
-			/* BPF_OFFLOAD_TRANSLATE, BPF_OFFLOAD_DESTROY */
-			struct {
-				struct bpf_prog *prog;
+		};
+		/* XDP_QUERY_PROG */
+		struct {
+			u8 prog_attached;
+			u32 prog_id;
+		};
+		/* BPF_OFFLOAD_VERIFIER_PREP */
+		struct {
+			struct bpf_prog *prog;
+			const struct bpf_ext_analyzer_ops *ops; /* callee set */
+		} verifier;
+		/* BPF_OFFLOAD_TRANSLATE, BPF_OFFLOAD_DESTROY */
+		struct {
+			struct bpf_prog *prog;
 		} offload;
 	};
 };
