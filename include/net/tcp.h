@@ -363,6 +363,8 @@ int tcp_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
 int tcp_sendmsg_locked(struct sock *sk, struct msghdr *msg, size_t size);
 int tcp_sendpage(struct sock *sk, struct page *page, int offset, size_t size,
 		 int flags);
+ssize_t do_tcp_sendpages(struct sock *sk, struct page *page, int offset,
+		 size_t size, int flags);
 int tcp_sendpage_locked(struct sock *sk, struct page *page, int offset,
 			size_t size, int flags);
 void tcp_release_cb(struct sock *sk);
@@ -436,6 +438,7 @@ void tcp_fetch_timewait_stamp(struct sock *sk, struct dst_entry *dst);
 void tcp_disable_fack(struct tcp_sock *tp);
 void tcp_close(struct sock *sk, long timeout);
 void tcp_init_sock(struct sock *sk);
+void tcp_init_transfer(struct sock *sk, int bpf_op);
 unsigned int tcp_poll(struct file *file, struct socket *sock,
 		      struct poll_table_struct *wait);
 int tcp_getsockopt(struct sock *sk, int level, int optname,
@@ -2103,107 +2106,7 @@ static inline bool tcp_bpf_ca_needs_ecn(struct sock *sk)
 static inline void tcp_listendrop(const struct sock *sk)
 {
 	atomic_inc(&((struct sock *)sk)->sk_drops);
-	__NET_INC_STATS(sock_net(sk), LINUX_MIB_LISTENDROPS);
-}
-
-/* Call BPF_SOCK_OPS program that returns an int. If the return value
- * is < 0, then the BPF op failed (for example if the loaded BPF
- * program does not support the chosen operation or there is no BPF
- * program loaded).
- */
-#ifdef CONFIG_BPF
-static inline int tcp_call_bpf(struct sock *sk, int op)
-{
-	struct bpf_sock_ops_kern sock_ops;
-	int ret;
-
-	if (sk_fullsock(sk))
-		sock_owned_by_me(sk);
-
-	memset(&sock_ops, 0, sizeof(sock_ops));
-	sock_ops.sk = sk;
-	sock_ops.op = op;
-
-	ret = BPF_CGROUP_RUN_PROG_SOCK_OPS(&sock_ops);
-	if (ret == 0)
-		ret = sock_ops.reply;
-	else
-		ret = -1;
-	return ret;
-}
-
-static inline int tcp_call_bpf_2arg(struct sock *sk, int op, u32 arg1, u32 arg2)
-{
-	u32 args[2] = {arg1, arg2};
-
-	return tcp_call_bpf(sk, op, 2, args);
-}
-
-static inline int tcp_call_bpf_3arg(struct sock *sk, int op, u32 arg1, u32 arg2,
-				    u32 arg3)
-{
-	u32 args[3] = {arg1, arg2, arg3};
-
-	return tcp_call_bpf(sk, op, 3, args);
-}
-
-#else
-static inline int tcp_call_bpf(struct sock *sk, int op, u32 nargs, u32 *args)
-{
-	return -EPERM;
-}
-
-static inline int tcp_call_bpf_2arg(struct sock *sk, int op, u32 arg1, u32 arg2)
-{
-	return -EPERM;
-}
-
-static inline int tcp_call_bpf_3arg(struct sock *sk, int op, u32 arg1, u32 arg2,
-				    u32 arg3)
-{
-	return -EPERM;
-}
-
-#endif
-
-static inline u32 tcp_timeout_init(struct sock *sk)
-{
-	int timeout;
-
-	timeout = tcp_call_bpf(sk, BPF_SOCK_OPS_TIMEOUT_INIT, 0, NULL);
-
-	if (timeout <= 0)
-		timeout = TCP_TIMEOUT_INIT;
-	return timeout;
-}
-
-static inline u32 tcp_rwnd_init_bpf(struct sock *sk)
-{
-	int rwnd;
-
-	rwnd = tcp_call_bpf(sk, BPF_SOCK_OPS_RWND_INIT, 0, NULL);
-
-	if (rwnd < 0)
-		rwnd = 0;
-	return rwnd;
-}
-
-static inline bool tcp_bpf_ca_needs_ecn(struct sock *sk)
-{
-	return (tcp_call_bpf(sk, BPF_SOCK_OPS_NEEDS_ECN, 0, NULL) == 1);
-}
-
-/*
- * TCP listen path runs lockless.
- * We forced "struct sock" to be const qualified to make sure
- * we don't modify one of its field by mistake.
- * Here, we increment sk_drops which is an atomic_t, so we can safely
- * make sock writable again.
- */
-static inline void tcp_listendrop(const struct sock *sk)
-{
-	atomic_inc(&((struct sock *)sk)->sk_drops);
-	NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_LISTENDROPS);
+	NET_INC_STATS(sock_net(sk), LINUX_MIB_LISTENDROPS);
 }
 
 enum hrtimer_restart tcp_pace_kick(struct hrtimer *timer);
@@ -2241,3 +2144,4 @@ int tcp_set_ulp_id(struct sock *sk, const int ulp);
 void tcp_get_available_ulp(char *buf, size_t len);
 void tcp_cleanup_ulp(struct sock *sk);
 
+#endif	/* _TCP_H */

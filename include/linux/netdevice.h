@@ -46,6 +46,7 @@
 #include <net/dcbnl.h>
 #endif
 #include <net/netprio_cgroup.h>
+#include <net/xdp.h>
 
 #include <linux/netdev_features.h>
 #include <linux/neighbour.h>
@@ -698,6 +699,7 @@ struct netdev_rx_queue {
 #endif
 	struct kobject			kobj;
 	struct net_device		*dev;
+	struct xdp_rxq_info		xdp_rxq;
 } ____cacheline_aligned_in_smp;
 
 /*
@@ -1829,12 +1831,11 @@ struct net_device {
 	/* Interface address info used in eth_type_trans() */
 	unsigned char		*dev_addr;
 
-#ifdef CONFIG_SYSFS
 	struct netdev_rx_queue	*_rx;
 
 	unsigned int		num_rx_queues;
 	unsigned int		real_num_rx_queues;
-#endif
+        struct bpf_prog __rcu	*xdp_prog;
 
 	unsigned long		gro_flush_timeout;
 	rx_handler_func_t __rcu	*rx_handler;

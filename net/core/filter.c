@@ -44,6 +44,7 @@
 #include <linux/timer.h>
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
+#include <asm/cmpxchg.h>
 #include <linux/filter.h>
 #include <linux/ratelimit.h>
 #include <linux/seccomp.h>
@@ -1876,6 +1877,7 @@ struct redirect_info {
 	u32 flags;
 	struct bpf_map *map;
 	struct bpf_map *map_to_flush;
+	unsigned long   map_owner;
 };
 
 static DEFINE_PER_CPU(struct redirect_info, redirect_info);
@@ -2881,7 +2883,6 @@ static int __bpf_tx_xdp(struct net_device *dev,
 	int err;
 
 	if (!dev->netdev_ops->ndo_xdp_xmit) {
-		bpf_warn_invalid_xdp_redirect(dev->ifindex);
 		return -EOPNOTSUPP;
 	}
 
@@ -2909,6 +2910,12 @@ void xdp_do_flush_map(void)
 		__dev_map_flush(map);
 }
 EXPORT_SYMBOL_GPL(xdp_do_flush_map);
+
+static inline bool xdp_map_invalid(const struct bpf_prog *xdp_prog,
+				   unsigned long aux)
+{
+	return (unsigned long)xdp_prog->aux != aux;
+}
 
 int xdp_do_redirect_map(struct net_device *dev, struct xdp_buff *xdp,
 			struct bpf_prog *xdp_prog)
@@ -2950,7 +2957,6 @@ int xdp_do_redirect(struct net_device *dev, struct xdp_buff *xdp,
 	fwd = dev_get_by_index_rcu(dev_net(dev), ri->ifindex);
 	ri->ifindex = 0;
 	if (unlikely(!fwd)) {
-		bpf_warn_invalid_xdp_redirect(ri->ifindex);
 		return -EINVAL;
 	}
 
@@ -2980,6 +2986,33 @@ static const struct bpf_func_proto bpf_xdp_redirect_proto = {
 	.arg2_type      = ARG_ANYTHING,
 };
 
+BPF_CALL_4(bpf_xdp_redirect_map, struct bpf_map *, map, u32, ifindex, u64, flags,
+	   unsigned long, map_owner)
+{
+	struct redirect_info *ri = this_cpu_ptr(&redirect_info);
+
+	if (unlikely(flags))
+		return XDP_ABORTED;
+
+	ri->ifindex = ifindex;
+	ri->flags = flags;
+	ri->map = map;
+	ri->map_owner = map_owner;
+
+	return XDP_REDIRECT;
+}
+
+/* Note, arg4 is hidden from users and populated by the verifier
+ * with the right pointer.
+ */
+static const struct bpf_func_proto bpf_xdp_redirect_map_proto = {
+	.func           = bpf_xdp_redirect_map,
+	.gpl_only       = false,
+	.ret_type       = RET_INTEGER,
+	.arg1_type      = ARG_CONST_MAP_PTR,
+	.arg2_type      = ARG_ANYTHING,
+	.arg3_type      = ARG_ANYTHING,
+};
 bool bpf_helper_changes_pkt_data(void *func)
 {
 	if (func == bpf_skb_vlan_push ||
@@ -3843,7 +3876,7 @@ xdp_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 	case BPF_FUNC_redirect:
 		return &bpf_xdp_redirect_proto;
 	case BPF_FUNC_redirect_map:
-		return &bpf_redirect_map_proto;
+		return &bpf_xdp_redirect_map_proto;
 	default:
 		return bpf_base_func_proto(func_id, prog);
 	}

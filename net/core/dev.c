@@ -96,6 +96,7 @@
 #include <linux/notifier.h>
 #include <linux/skbuff.h>
 #include <linux/bpf.h>
+#include <linux/bpf_trace.h>
 #include <net/net_namespace.h>
 #include <net/sock.h>
 #include <net/busy_poll.h>
@@ -1787,7 +1788,7 @@ static inline void net_timestamp_set(struct sk_buff *skb)
 			__net_timestamp(SKB);		\
 	}						\
 
-bool is_skb_forwardable(const struct net_device *dev, const struct sk_buff *skb)
+bool is_skb_forwardable(struct net_device *dev, struct sk_buff *skb)
 {
 	unsigned int len;
 
@@ -4035,8 +4036,6 @@ int do_xdp_generic(struct bpf_prog *xdp_prog, struct sk_buff *skb)
 		if (act != XDP_PASS) {
 			switch (act) {
 			case XDP_REDIRECT:
-				err = xdp_do_generic_redirect(skb->dev, skb,
-							      xdp_prog);
 				if (err)
 					goto out_redir;
 			/* fallthru to submit skb */

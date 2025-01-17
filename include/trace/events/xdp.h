@@ -78,6 +78,15 @@ TRACE_EVENT(xdp_redirect,
 		  __get_str(name_from), __get_str(name_to),
 		  __print_symbolic(__entry->act, __XDP_ACT_SYM_TAB))
 );
+
+#define _trace_xdp_redirect_map(dev, xdp, fwd, map, idx)		\
+	 trace_xdp_redirect_map(dev, xdp, fwd ? fwd->ifindex : 0,	\
+				0, map, idx)
+
+#define _trace_xdp_redirect_map_err(dev, xdp, fwd, map, idx, err)	\
+	 trace_xdp_redirect_map_err(dev, xdp, fwd ? fwd->ifindex : 0,	\
+				    err, map, idx)
+
 #endif /* _TRACE_XDP_H */
 
 #include <trace/define_trace.h>

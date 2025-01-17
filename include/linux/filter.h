@@ -17,6 +17,7 @@
 #include <linux/cryptohash.h>
 #include <linux/kallsyms.h>
 
+#include <net/xdp.h>
 #include <net/sch_generic.h>
 
 #include <asm/cacheflush.h>
@@ -589,6 +590,7 @@ struct xdp_buff {
 	void *data_end;
 	void *data_meta;
 	void *data_hard_start;
+	struct xdp_rxq_info *rxq;
 };
 
 struct sk_msg_buff {
@@ -852,7 +854,8 @@ static inline bool bpf_dump_raw_ok(void)
 
 struct bpf_prog *bpf_patch_insn_single(struct bpf_prog *prog, u32 off,
 				       const struct bpf_insn *patch, u32 len);
-
+int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
+			    struct bpf_prog *prog);
 /* The pair of xdp_do_redirect and xdp_do_flush_map MUST be called in the
  * same cpu context. Further for best results no more than a single map
  * for the do_redirect/do_flush pair should be used. This limitation is
